@@ -6,38 +6,50 @@ import torch.nn as nn
 import mediapipe as mp
 import pandas as pd
 import tempfile
-from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration, WebRtcMode
-import av
-import threading
+import time
+import os
 
 # ===========================
-# 1. 页面配置
+# 1. 页面配置与美化 (UI Configuration)
 # ===========================
 st.set_page_config(
-    page_title="AI Gesture Recognition System",
-    page_icon="🖐️",
+    page_title="AI Gesture Studio",
+    page_icon="🎬",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# 兼容性补丁
-if not hasattr(st, "experimental_rerun"):
-    st.experimental_rerun = st.rerun
-
+# 自定义 CSS：美化按钮、隐藏默认菜单、调整字体
 st.markdown("""
     <style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    .stApp {background-color: #F5F7F9;}
+    .main {
+        background-color: #f8f9fa;
+    }
+    .stButton>button {
+        width: 100%;
+        border-radius: 10px;
+        height: 3em;
+        background-color: #FF4B4B;
+        color: white;
+        font-weight: bold;
+    }
+    .stButton>button:hover {
+        background-color: #D93F3F;
+        border-color: #D93F3F;
+    }
+    h1 {
+        color: #1E1E1E;
+    }
+    .css-1aumxhk {
+        padding: 1rem;
+    }
     </style>
     """, unsafe_allow_html=True)
 
 # ===========================
-# 2. 模型定义
+# 2. 核心模型定义 (Model Core)
 # ===========================
 mp_holistic = mp.solutions.holistic
-mp_drawing = mp.solutions.drawing_utils
-mp_drawing_styles = mp.solutions.drawing_styles
 
 class Attention(nn.Module):
     def __init__(self, hidden_dim):
@@ -82,171 +94,173 @@ def extract_keypoints(results):
 @st.cache_resource
 def load_model():
     gestures = [f"Gesture {i}" for i in range(1, 16)] 
+    
     device = torch.device("cpu")
     model = BiLSTMAttention(input_size=258, hidden_size=128, num_classes=len(gestures))
+    
+    status_text = "Checking model file..."
     try:
         model.load_state_dict(torch.load("trained_model.pth", map_location=device))
         model.eval()
-        st.sidebar.success("Model Loaded Successfully!", icon="✅")
+        return model, gestures, "Loaded"
     except FileNotFoundError:
-        st.sidebar.error("Critical Error: 'trained_model.pth' not found.")
-        return None, None
+        return None, None, "Missing File"
     except Exception as e:
-        st.sidebar.error(f"Failed to load model: {e}")
-        return None, None
-    return model, gestures
-
-global_model, global_gestures = load_model()
+        return None, None, f"Error: {str(e)}"
 
 # ===========================
-# 3. 摄像头处理逻辑
-# ===========================
-class GestureProcessor(VideoProcessorBase):
-    def __init__(self):
-        self.holistic = mp_holistic.Holistic(
-            min_detection_confidence=0.5, 
-            min_tracking_confidence=0.5
-        )
-        self.sequence = [] 
-        self.predicted_gesture = "Waiting..."
-        self.confidence_str = ""
-        self.lock = threading.Lock() 
-
-    def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
-        try:
-            image = frame.to_ndarray(format="bgr24")
-            
-            # 降低处理频率：如果图片过大，可以稍微缩小一点以提高速度
-            # image = cv2.resize(image, (640, 480))
-
-            image.flags.writeable = False
-            image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            results = self.holistic.process(image_rgb)
-            image.flags.writeable = True
-
-            mp_drawing.draw_landmarks(image, results.pose_landmarks, mp_holistic.POSE_CONNECTIONS,
-                                    landmark_drawing_spec=mp_drawing_styles.get_default_pose_landmarks_style())
-            mp_drawing.draw_landmarks(image, results.left_hand_landmarks, mp_holistic.HAND_CONNECTIONS)
-            mp_drawing.draw_landmarks(image, results.right_hand_landmarks, mp_holistic.HAND_CONNECTIONS)
-
-            keypoints = extract_keypoints(results)
-            
-            with self.lock:
-                self.sequence.append(keypoints)
-                self.sequence = self.sequence[-30:] 
-
-                if len(self.sequence) == 30 and global_model is not None:
-                    input_tensor = torch.tensor(np.array([self.sequence]), dtype=torch.float32)
-                    with torch.no_grad():
-                        output = global_model(input_tensor)
-                        probs = torch.softmax(output, dim=1)[0]
-                        conf, idx = torch.max(probs, 0)
-                        
-                        current_conf = conf.item()
-                        if current_conf > 0.6: 
-                            self.predicted_gesture = global_gestures[idx.item()]
-                            self.confidence_str = f"({current_conf*100:.1f}%)"
-                        else:
-                            self.predicted_gesture = "Analyzing..."
-                            self.confidence_str = ""
-
-            cv2.rectangle(image, (0,0), (640, 40), (245, 117, 16), -1)
-            cv2.putText(image, f"Result: {self.predicted_gesture} {self.confidence_str}", 
-                        (10,30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
-
-            return av.VideoFrame.from_ndarray(image, format="bgr24")
-        except Exception as e:
-            # 捕获任何处理错误，防止断开连接
-            print(f"Error in processing: {e}")
-            return frame
-
-# ===========================
-# 4. 界面布局
+# 3. 侧边栏设计 (Sidebar)
 # ===========================
 with st.sidebar:
-    st.title("Control Panel ⚙️")
+    st.image("https://mediapipe.dev/images/mobile/pose_tracking_example.gif", use_column_width=True)
+    st.title("🧩 System Dashboard")
     st.markdown("---")
-    app_mode = st.radio("Select Mode:", ["📸 Real-time Webcam", "📂 Upload Video File"])
+    
+    # 模型状态指示器
+    model, gestures, status = load_model()
+    if status == "Loaded":
+        st.success("Model Status: **Active** ✅")
+        st.caption(f"Architecture: BiLSTM + Attention\nClasses: {len(gestures)}")
+    else:
+        st.error(f"Model Status: **{status}** ❌")
+        st.warning("Please upload 'trained_model.pth' to your GitHub repository.")
+    
     st.markdown("---")
-    st.info("System Ready.")
+    st.info("""
+    **How to use:**
+    1. Upload a video file.
+    2. Click 'Start Analysis'.
+    3. View frame-by-frame processing.
+    4. Check the prediction report.
+    """)
+    st.markdown("---")
+    st.caption("CV Group Assignment 2025")
 
-st.markdown("<h1 style='text-align: center; color: #FF4B4B;'>🖐️ AI Gesture Recognition System</h1>", unsafe_allow_html=True)
+# ===========================
+# 4. 主界面设计 (Main Interface)
+# ===========================
+
+# 标题区
+st.markdown("# 🎬 AI Gesture Analysis Studio")
+st.markdown("#### Upload a video to identify dynamic gestures using Deep Learning.")
 st.markdown("---")
 
-if global_model is None:
-    st.error("Model not loaded.")
-    st.stop()
+# 文件上传区
+uploaded_file = st.file_uploader("", type=['mp4', 'mov', 'avi'], help="Supported formats: MP4, MOV, AVI")
 
-if app_mode == "📸 Real-time Webcam":
-    st.header("📸 Real-time Inference")
-    st.write("Please allow browser camera access.")
+if uploaded_file is not None:
+    # 保存临时文件
+    tfile = tempfile.NamedTemporaryFile(delete=False)
+    tfile.write(uploaded_file.read())
     
-    col1, col2 = st.columns([2, 1])
+    # 布局：左侧视频，右侧结果占位
+    col_video, col_results = st.columns([1.5, 1])
     
-    with col1:
-        rtc_configuration = RTCConfiguration(
-            {"iceServers": [
-                {"urls": ["stun:stun.l.google.com:19302"]},
-                {"urls": ["stun:stun1.l.google.com:19302"]},
-                {"urls": ["stun:stun2.l.google.com:19302"]},
-                {"urls": ["stun:stun3.l.google.com:19302"]},
-                {"urls": ["stun:stun4.l.google.com:19302"]},
-            ]}
-        )
+    with col_video:
+        st.subheader("📺 Video Preview")
+        st.video(uploaded_file)
         
-        webrtc_ctx = webrtc_streamer(
-            key="gesture-recognition",
-            mode=WebRtcMode.SENDRECV,
-            rtc_configuration=rtc_configuration,
-            video_processor_factory=GestureProcessor,
-            media_stream_constraints={"video": True, "audio": False},
-        )
-        
-    with col2:
-        st.subheader("💡 Instructions")
-        st.write("Click START to begin.")
-        st.caption("Note: Initialization may take 10-20 seconds due to cloud latency.")
-        if webrtc_ctx.state.playing:
-             st.success("Camera Running", icon="🤖")
+        # 启动按钮
+        process_btn = st.button("🚀 Start Deep Analysis", type="primary")
 
-elif app_mode == "📂 Upload Video File":
-    st.header("📂 Offline Analysis")
-    uploaded_file = st.file_uploader("Upload Video (mp4/mov/avi)", type=['mp4', 'mov', 'avi'])
-    
-    if uploaded_file is not None:
-        tfile = tempfile.NamedTemporaryFile(delete=False)
-        tfile.write(uploaded_file.read())
-        col1, col2 = st.columns([3, 2])
-        with col1: st.video(uploaded_file)
-        with col2:
-            if st.button("Start Analysis", type="primary"):
-                with st.spinner("Processing..."):
-                    cap = cv2.VideoCapture(tfile.name)
-                    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                    skip = max(int(total/30), 1)
-                    seq = []
-                    with mp_holistic.Holistic() as holistic:
-                        for i in range(30):
-                            cap.set(cv2.CAP_PROP_POS_FRAMES, i*skip)
-                            ret, f = cap.read()
-                            if not ret: break
-                            f = cv2.cvtColor(f, cv2.COLOR_BGR2RGB)
-                            res = holistic.process(f)
-                            seq.append(extract_keypoints(res))
-                    cap.release()
-                    while len(seq)<30: seq.append(np.zeros(258))
+    if process_btn:
+        if model is None:
+            st.error("Cannot proceed: Model not loaded.")
+        else:
+            with col_results:
+                st.subheader("📊 Analysis Report")
+                
+                # 进度条和状态文本
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                
+                # --- 视频处理逻辑 ---
+                cap = cv2.VideoCapture(tfile.name)
+                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                
+                # 简单防错
+                if total_frames == 0: total_frames = 100
+                
+                # 采样策略：均匀提取30帧
+                skip = max(int(total_frames / 30), 1)
+                sequence = []
+                
+                status_text.markdown("**🔄 Initializing MediaPipe...**")
+                
+                # 使用 MediaPipe 处理
+                with mp_holistic.Holistic(min_detection_confidence=0.5, min_tracking_confidence=0.5) as holistic:
+                    frames_processed = 0
                     
-                    inp = torch.tensor(np.array([seq]), dtype=torch.float32)
+                    for i in range(30):
+                        # 更新进度条
+                        progress = int((i / 30) * 100)
+                        progress_bar.progress(progress)
+                        status_text.text(f"Processing frame {i+1}/30...")
+                        
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, i * skip)
+                        ret, frame = cap.read()
+                        if not ret: break
+                        
+                        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        res = holistic.process(frame)
+                        sequence.append(extract_keypoints(res))
+                        frames_processed += 1
+                
+                cap.release()
+                progress_bar.progress(100)
+                status_text.success("✅ Feature Extraction Complete!")
+                
+                # 补齐数据 (Padding)
+                while len(sequence) < 30:
+                    sequence.append(np.zeros(258))
+                
+                # --- 推理逻辑 ---
+                with st.spinner("🧠 Running Neural Network Inference..."):
+                    input_tensor = torch.tensor(np.array([sequence]), dtype=torch.float32)
                     with torch.no_grad():
-                        out = global_model(inp)
-                        probs = torch.softmax(out, dim=1)[0]
+                        output = model(input_tensor)
+                        probs = torch.softmax(output, dim=1)[0]
                     
+                    # 获取结果
                     conf, idx = torch.max(probs, 0)
-                    st.success(f"Prediction: **{global_gestures[idx.item()]}**")
-                    st.metric("Confidence", f"{conf.item()*100:.2f}%")
+                    prediction = gestures[idx.item()]
+                    confidence_val = conf.item() * 100
                     
-                    chart_data = pd.DataFrame({
-                        "Gesture": global_gestures,
-                        "Prob": probs.numpy()
-                    }).sort_values("Prob", ascending=False)
-                    st.bar_chart(chart_data.set_index("Gesture"))
+                    time.sleep(0.5)
+
+                # --- 结果展示 (Result Dashboard) ---
+                st.divider()
+                
+                # 1. 核心指标卡片
+                st.metric(
+                    label="🏆 Top Prediction",
+                    value=prediction,
+                    delta=f"{confidence_val:.2f}% Confidence"
+                )
+                
+                if confidence_val > 80:
+                    st.balloons() 
+                
+                # 2. 概率分布图 (显示所有权重)
+                st.write("### 📈 Full Probability Distribution")
+                
+                # 整理数据 (排序：从高到低，但保留所有行)
+                chart_data = pd.DataFrame({
+                    "Gesture": gestures,
+                    "Probability": probs.numpy()
+                }).sort_values(by="Probability", ascending=False)
+                
+                st.bar_chart(
+                    chart_data, 
+                    x="Gesture", 
+                    y="Probability",
+                    color="#FF4B4B"
+                )
+                
+                # 3. 详细数据展开
+                with st.expander("📄 View Raw Data Table"):
+                    st.dataframe(chart_data.style.format({"Probability": "{:.4%}"})) # 增加小数位精度
+
+else:
+    # 空状态提示
+    st.info("👈 Please upload a video file from the sidebar or main area to begin.")
