@@ -1,8 +1,9 @@
 streamlit
-mediapipe==0.10.13
+mediapipe
 opencv-python-headless
 torch
 numpy
 pandas
 streamlit-webrtc==0.47.0
+aiortc==1.6.0
 av
