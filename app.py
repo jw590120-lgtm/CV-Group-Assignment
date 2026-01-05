@@ -77,7 +77,6 @@ def extract_keypoints(results):
 # --- 加载模型 (Load Model) ---
 @st.cache_resource
 def load_model():
-    # 这里的顺序必须和训练时的标签顺序完全一致
     gestures = [f"Gesture {i}" for i in range(1, 16)] 
     
     device = torch.device("cpu")
@@ -148,7 +147,7 @@ class GestureProcessor(VideoProcessorBase):
                         self.predicted_gesture = "Analyzing..."
                         self.confidence_str = ""
 
-        # 在视频上绘制结果 (橙色背景条)
+        # 在视频上绘制结果
         cv2.rectangle(image, (0,0), (640, 40), (245, 117, 16), -1)
         cv2.putText(image, f"Result: {self.predicted_gesture} {self.confidence_str}", 
                     (10,30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
@@ -161,7 +160,6 @@ class GestureProcessor(VideoProcessorBase):
 
 # --- 侧边栏 (Sidebar) ---
 with st.sidebar:
-    st.image("https://mediapipe.dev/images/mobile/pose_tracking_example.gif", use_column_width=True)
     st.title("Control Panel ⚙️")
     st.markdown("---")
     app_mode = st.radio("Select Mode:", ["📸 Real-time Webcam", "📂 Upload Video File"])
@@ -197,7 +195,7 @@ if app_mode == "📸 Real-time Webcam":
         
         webrtc_ctx = webrtc_streamer(
             key="gesture-recognition",
-            mode=WebRtcMode.SENDRECV, 
+            mode=WebRtcMode.SENDRECV, # 已经修正为 WebRtcMode.SENDRECV
             rtc_configuration=rtc_configuration,
             video_processor_factory=GestureProcessor,
             media_stream_constraints={"video": True, "audio": False},
@@ -272,4 +270,3 @@ elif app_mode == "📂 Upload Video File":
                     }).sort_values(by="Probability (%)", ascending=False)
                     
                     st.bar_chart(chart_data.set_index("Gesture"), color="#FF4B4B")
-
