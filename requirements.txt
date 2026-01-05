@@ -5,5 +5,4 @@ torch
 numpy
 pandas
 streamlit-webrtc==0.47.0
-aiortc==1.6.0
 av
