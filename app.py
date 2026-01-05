@@ -19,7 +19,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 自定义 CSS：美化按钮、隐藏默认菜单、调整字体
 st.markdown("""
     <style>
     .main {
@@ -93,6 +92,7 @@ def extract_keypoints(results):
 # --- 加载模型 ---
 @st.cache_resource
 def load_model():
+    # 【重要】请修改为你真实的15个英文手势名称
     gestures = [f"Gesture {i}" for i in range(1, 16)] 
     
     device = torch.device("cpu")
@@ -112,7 +112,6 @@ def load_model():
 # 3. 侧边栏设计 (Sidebar)
 # ===========================
 with st.sidebar:
-    st.image("https://mediapipe.dev/images/mobile/pose_tracking_example.gif", use_column_width=True)
     st.title("🧩 System Dashboard")
     st.markdown("---")
     
@@ -178,7 +177,6 @@ if uploaded_file is not None:
                 cap = cv2.VideoCapture(tfile.name)
                 total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
                 
-                # 简单防错
                 if total_frames == 0: total_frames = 100
                 
                 # 采样策略：均匀提取30帧
@@ -244,12 +242,13 @@ if uploaded_file is not None:
                 # 2. 概率分布图 (显示所有权重)
                 st.write("### 📈 Full Probability Distribution")
                 
-                # 整理数据 (排序：从高到低，但保留所有行)
+                # 整理数据
                 chart_data = pd.DataFrame({
                     "Gesture": gestures,
                     "Probability": probs.numpy()
                 }).sort_values(by="Probability", ascending=False)
                 
+                # 直接展示所有数据
                 st.bar_chart(
                     chart_data, 
                     x="Gesture", 
@@ -259,7 +258,7 @@ if uploaded_file is not None:
                 
                 # 3. 详细数据展开
                 with st.expander("📄 View Raw Data Table"):
-                    st.dataframe(chart_data.style.format({"Probability": "{:.4%}"})) # 增加小数位精度
+                    st.dataframe(chart_data.style.format({"Probability": "{:.4%}"}))
 
 else:
     # 空状态提示
