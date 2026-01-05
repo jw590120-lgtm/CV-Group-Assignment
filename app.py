@@ -9,6 +9,9 @@ import tempfile
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration, WebRtcMode
 import av
 import threading
+import streamlit as st
+if not hasattr(st, "experimental_rerun"):
+    st.experimental_rerun = st.rerun
 
 # ===========================
 # 1. 页面配置 (Page Configuration)
@@ -270,3 +273,4 @@ elif app_mode == "📂 Upload Video File":
                     }).sort_values(by="Probability (%)", ascending=False)
                     
                     st.bar_chart(chart_data.set_index("Gesture"), color="#FF4B4B")
+
