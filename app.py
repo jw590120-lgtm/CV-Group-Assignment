@@ -191,9 +191,14 @@ if app_mode == "📸 Real-time Webcam":
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        # WebRTC 配置 (STUN Server)
         rtc_configuration = RTCConfiguration(
-            {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+            {"iceServers": [
+                {"urls": ["stun:stun.l.google.com:19302"]},
+                {"urls": ["stun:stun1.l.google.com:19302"]},
+                {"urls": ["stun:stun2.l.google.com:19302"]},
+                {"urls": ["stun:stun.services.mozilla.com"]},
+                {"urls": ["stun:stun.nodereal.io:3478"]},
+            ]}
         )
         
         webrtc_ctx = webrtc_streamer(
@@ -273,4 +278,5 @@ elif app_mode == "📂 Upload Video File":
                     }).sort_values(by="Probability (%)", ascending=False)
                     
                     st.bar_chart(chart_data.set_index("Gesture"), color="#FF4B4B")
+
 
