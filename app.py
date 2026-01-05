@@ -6,7 +6,7 @@ import torch.nn as nn
 import mediapipe as mp
 import pandas as pd
 import tempfile
-from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
+from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration, WebRtcMode
 import av
 import threading
 
@@ -197,7 +197,7 @@ if app_mode == "📸 Real-time Webcam":
         
         webrtc_ctx = webrtc_streamer(
             key="gesture-recognition",
-            mode=webrtc_streamer.WebRtcMode.SENDRECV,
+            mode=WebRtcMode.SENDRECV, 
             rtc_configuration=rtc_configuration,
             video_processor_factory=GestureProcessor,
             media_stream_constraints={"video": True, "audio": False},
@@ -272,3 +272,4 @@ elif app_mode == "📂 Upload Video File":
                     }).sort_values(by="Probability (%)", ascending=False)
                     
                     st.bar_chart(chart_data.set_index("Gesture"), color="#FF4B4B")
+
