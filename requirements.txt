@@ -1,0 +1,6 @@
+streamlit
+mediapipe==0.10.13
+opencv-python-headless
+torch
+numpy
+pandas
