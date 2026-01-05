@@ -4,3 +4,5 @@ opencv-python-headless
 torch
 numpy
 pandas
+streamlit-webrtc==0.47.0
+av==10.0.0
