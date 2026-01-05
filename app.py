@@ -11,7 +11,7 @@ import av
 import threading
 
 # ===========================
-# 1. 页面配置 (Page Configuration)
+# 1. 页面配置
 # ===========================
 st.set_page_config(
     page_title="AI Gesture Recognition System",
@@ -20,13 +20,10 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ---------------------------------------------------------
-# 🔧 兼容性补丁 (Compatibility Patch)
-# ---------------------------------------------------------
+# 兼容性补丁
 if not hasattr(st, "experimental_rerun"):
     st.experimental_rerun = st.rerun
 
-# 自定义 CSS
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -36,7 +33,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # ===========================
-# 2. 模型定义 (Model Architecture)
+# 2. 模型定义
 # ===========================
 mp_holistic = mp.solutions.holistic
 mp_drawing = mp.solutions.drawing_utils
@@ -85,7 +82,6 @@ def extract_keypoints(results):
 @st.cache_resource
 def load_model():
     gestures = [f"Gesture {i}" for i in range(1, 16)] 
-    
     device = torch.device("cpu")
     model = BiLSTMAttention(input_size=258, hidden_size=128, num_classes=len(gestures))
     try:
@@ -117,44 +113,52 @@ class GestureProcessor(VideoProcessorBase):
         self.lock = threading.Lock() 
 
     def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
-        image = frame.to_ndarray(format="bgr24")
-        
-        image.flags.writeable = False
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        results = self.holistic.process(image_rgb)
-        image.flags.writeable = True
+        try:
+            image = frame.to_ndarray(format="bgr24")
+            
+            # 降低处理频率：如果图片过大，可以稍微缩小一点以提高速度
+            # image = cv2.resize(image, (640, 480))
 
-        mp_drawing.draw_landmarks(image, results.pose_landmarks, mp_holistic.POSE_CONNECTIONS,
-                                 landmark_drawing_spec=mp_drawing_styles.get_default_pose_landmarks_style())
-        mp_drawing.draw_landmarks(image, results.left_hand_landmarks, mp_holistic.HAND_CONNECTIONS)
-        mp_drawing.draw_landmarks(image, results.right_hand_landmarks, mp_holistic.HAND_CONNECTIONS)
+            image.flags.writeable = False
+            image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            results = self.holistic.process(image_rgb)
+            image.flags.writeable = True
 
-        keypoints = extract_keypoints(results)
-        
-        with self.lock:
-            self.sequence.append(keypoints)
-            self.sequence = self.sequence[-30:] 
+            mp_drawing.draw_landmarks(image, results.pose_landmarks, mp_holistic.POSE_CONNECTIONS,
+                                    landmark_drawing_spec=mp_drawing_styles.get_default_pose_landmarks_style())
+            mp_drawing.draw_landmarks(image, results.left_hand_landmarks, mp_holistic.HAND_CONNECTIONS)
+            mp_drawing.draw_landmarks(image, results.right_hand_landmarks, mp_holistic.HAND_CONNECTIONS)
 
-            if len(self.sequence) == 30 and global_model is not None:
-                input_tensor = torch.tensor(np.array([self.sequence]), dtype=torch.float32)
-                with torch.no_grad():
-                    output = global_model(input_tensor)
-                    probs = torch.softmax(output, dim=1)[0]
-                    conf, idx = torch.max(probs, 0)
-                    
-                    current_conf = conf.item()
-                    if current_conf > 0.6: 
-                        self.predicted_gesture = global_gestures[idx.item()]
-                        self.confidence_str = f"({current_conf*100:.1f}%)"
-                    else:
-                        self.predicted_gesture = "Analyzing..."
-                        self.confidence_str = ""
+            keypoints = extract_keypoints(results)
+            
+            with self.lock:
+                self.sequence.append(keypoints)
+                self.sequence = self.sequence[-30:] 
 
-        cv2.rectangle(image, (0,0), (640, 40), (245, 117, 16), -1)
-        cv2.putText(image, f"Result: {self.predicted_gesture} {self.confidence_str}", 
-                    (10,30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
+                if len(self.sequence) == 30 and global_model is not None:
+                    input_tensor = torch.tensor(np.array([self.sequence]), dtype=torch.float32)
+                    with torch.no_grad():
+                        output = global_model(input_tensor)
+                        probs = torch.softmax(output, dim=1)[0]
+                        conf, idx = torch.max(probs, 0)
+                        
+                        current_conf = conf.item()
+                        if current_conf > 0.6: 
+                            self.predicted_gesture = global_gestures[idx.item()]
+                            self.confidence_str = f"({current_conf*100:.1f}%)"
+                        else:
+                            self.predicted_gesture = "Analyzing..."
+                            self.confidence_str = ""
 
-        return av.VideoFrame.from_ndarray(image, format="bgr24")
+            cv2.rectangle(image, (0,0), (640, 40), (245, 117, 16), -1)
+            cv2.putText(image, f"Result: {self.predicted_gesture} {self.confidence_str}", 
+                        (10,30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
+
+            return av.VideoFrame.from_ndarray(image, format="bgr24")
+        except Exception as e:
+            # 捕获任何处理错误，防止断开连接
+            print(f"Error in processing: {e}")
+            return frame
 
 # ===========================
 # 4. 界面布局
@@ -185,8 +189,8 @@ if app_mode == "📸 Real-time Webcam":
                 {"urls": ["stun:stun.l.google.com:19302"]},
                 {"urls": ["stun:stun1.l.google.com:19302"]},
                 {"urls": ["stun:stun2.l.google.com:19302"]},
-                {"urls": ["stun:stun.services.mozilla.com"]},
-                {"urls": ["stun:stun.nodereal.io:3478"]},
+                {"urls": ["stun:stun3.l.google.com:19302"]},
+                {"urls": ["stun:stun4.l.google.com:19302"]},
             ]}
         )
         
@@ -196,12 +200,12 @@ if app_mode == "📸 Real-time Webcam":
             rtc_configuration=rtc_configuration,
             video_processor_factory=GestureProcessor,
             media_stream_constraints={"video": True, "audio": False},
-            async_processing=True,
         )
         
     with col2:
         st.subheader("💡 Instructions")
         st.write("Click START to begin.")
+        st.caption("Note: Initialization may take 10-20 seconds due to cloud latency.")
         if webrtc_ctx.state.playing:
              st.success("Camera Running", icon="🤖")
 
