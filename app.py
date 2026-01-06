@@ -128,11 +128,24 @@ with st.sidebar:
     st.title("🧩 System Dashboard")
     st.markdown("---")
     
-    # 隐私保护开关
+    # --- 功能区 1: 验证模式 ---
+    st.write("### 🎯 Validation Mode")
+    st.caption("Select the actual gesture to verify prediction correctness.")
+    
+    # 加载词汇表用于下拉菜单
+    _, gestures_list, _ = load_model()
+    if gestures_list:
+        # 添加一个 "Unknown" 选项作为默认值
+        ground_truth_options = ["❓ Select Ground Truth..."] + gestures_list
+        ground_truth = st.selectbox("Actual Gesture (Truth):", ground_truth_options)
+    else:
+        ground_truth = "❓ Select Ground Truth..."
+
+    st.markdown("---")
+    
+    # --- 功能区 2: 隐私保护 ---
     st.write("### 🛡️ Privacy Settings")
-    enable_blur = st.checkbox("🙈 Blur Faces", value=False, help="Automatically detect and blur faces.")
-    if enable_blur:
-        st.info("Privacy Mode Active: Faces will be blurred.")
+    enable_blur = st.checkbox("🙈 Blur Faces", value=False)
     
     st.markdown("---")
     
@@ -140,9 +153,6 @@ with st.sidebar:
     model, gestures, status = load_model()
     if status == "Loaded":
         st.success("Model Status: **Active** ✅")
-        st.warning("⚠️ **Model Limitation**")
-        st.caption("Current model supports ONLY these 15 gestures:")
-        st.code("\n".join(gestures), language="text")
     else:
         st.error(f"Model Status: **{status}** ❌")
         st.warning("Please upload 'trained_model.pth'.")
@@ -155,31 +165,25 @@ with st.sidebar:
 # ===========================
 
 st.markdown("# 🎬 AI Gesture Analysis Studio")
-# 【修改点1】更新副标题，加入时长限制说明
 st.markdown("#### Upload a video (Max 3s) to identify dynamic gestures using Deep Learning.")
 st.markdown("---")
 
-# 【修改点2】在上传组件的help中也加入说明
-uploaded_file = st.file_uploader("", type=['mp4', 'mov', 'avi'], help="Limit: 3 seconds max. Formats: MP4, MOV, AVI")
+uploaded_file = st.file_uploader("", type=['mp4', 'mov', 'avi'], help="Limit: 3 seconds max.")
 
 if uploaded_file is not None:
     tfile = tempfile.NamedTemporaryFile(delete=False)
     tfile.write(uploaded_file.read())
     
-    # --- 【修改点3】新增：检测视频时长 ---
     cap_check = cv2.VideoCapture(tfile.name)
     fps = cap_check.get(cv2.CAP_PROP_FPS)
     frame_count = cap_check.get(cv2.CAP_PROP_FRAME_COUNT)
     duration = frame_count / fps if fps > 0 else 0
     cap_check.release()
     
-    # 如果视频超过 3.5秒 (给0.5秒缓冲)，则阻止运行
     if duration > 3.5:
         st.error(f"⛔ **Video too long!** ({duration:.2f}s)")
-        st.warning("Please upload a video shorter than **3 seconds** for optimal accuracy.")
-        # 这里不显示后续的 UI，直接结束
+        st.warning("Please upload a video shorter than **3 seconds**.")
     else:
-        # 视频符合要求，继续显示界面
         col_video, col_results = st.columns([1.5, 1])
         
         with col_video:
@@ -197,7 +201,7 @@ if uploaded_file is not None:
                 st.error("Cannot proceed: Model not loaded.")
             else:
                 with col_results:
-                    st.subheader("📊 Processing Status")
+                    st.subheader("📊 Analysis Report")
                     
                     progress_bar = st.progress(0)
                     status_text = st.empty()
@@ -210,7 +214,6 @@ if uploaded_file is not None:
                     sequence = []
                     
                     with mp_holistic.Holistic(min_detection_confidence=0.5, min_tracking_confidence=0.5) as holistic:
-                        frames_processed = 0
                         
                         for i in range(30):
                             progress = int((i / 30) * 100)
@@ -231,14 +234,13 @@ if uploaded_file is not None:
                             mp_drawing.draw_landmarks(display_frame, res.left_hand_landmarks, mp_holistic.HAND_CONNECTIONS)
                             mp_drawing.draw_landmarks(display_frame, res.right_hand_landmarks, mp_holistic.HAND_CONNECTIONS)
                             
-                            frame_window.image(display_frame, channels="RGB", caption=f"Frame {i+1}", use_column_width=True)
+                            frame_window.image(display_frame, channels="RGB", caption=f"Processing...", use_column_width=True)
                             
                             sequence.append(extract_keypoints(res))
-                            frames_processed += 1
                     
                     cap.release()
                     progress_bar.progress(100)
-                    status_text.success("✅ Extraction Complete!")
+                    status_text.success("✅ Complete!")
                     
                     while len(sequence) < 30:
                         sequence.append(np.zeros(258))
@@ -255,20 +257,42 @@ if uploaded_file is not None:
                         time.sleep(0.5)
 
                     st.divider()
-                    st.metric(label="🏆 Top Prediction", value=prediction, delta=f"{confidence_val:.2f}% Confidence")
                     
-                    if confidence_val > 80: st.balloons()
+                    # --- 【核心修改】颜色判断逻辑 ---
                     
-                    st.write("### 📈 Full Probability Distribution")
+                    # 默认颜色 (如果没有选择 Ground Truth)
+                    bar_color = "#808080" # 灰色 (中立)
+                    result_msg = "Prediction Result"
+                    
+                    # 检查用户是否在侧边栏选择了真实动作
+                    if ground_truth != "❓ Select Ground Truth...":
+                        if prediction.lower() == ground_truth.lower():
+                            # 预测正确 -> 绿色
+                            bar_color = "#2ECC71" # Green
+                            result_msg = "✅ Correct Prediction!"
+                            st.success(f"Matched Ground Truth: **{ground_truth}**")
+                        else:
+                            # 预测错误 -> 红色
+                            bar_color = "#E74C3C" # Red
+                            result_msg = "❌ Incorrect Prediction"
+                            st.error(f"Expected: **{ground_truth}**, but got **{prediction}**")
+                    else:
+                        # 如果没选，默认使用主题色 (红色) 或中立色
+                        bar_color = "#FF4B4B" 
+
+                    st.metric(label=result_msg, value=prediction, delta=f"{confidence_val:.2f}% Confidence")
+                    
+                    st.write("### 📈 Probability Distribution")
                     chart_data = pd.DataFrame({
                         "Gesture": gestures,
                         "Probability": probs.numpy()
                     }).sort_values(by="Probability", ascending=False)
                     
-                    st.bar_chart(chart_data, x="Gesture", y="Probability", color="#FF4B4B")
+                    # 动态设置图表颜色
+                    st.bar_chart(chart_data, x="Gesture", y="Probability", color=bar_color)
                     
-                    with st.expander("📄 View Raw Data Table"):
+                    with st.expander("📄 View Raw Data"):
                         st.dataframe(chart_data.style.format({"Probability": "{:.4%}"}))
 
 else:
-    st.info("👈 Please upload a video file (Max 3s) from the sidebar or main area to begin.")
+    st.info("👈 Please upload a video file (Max 3s).")
