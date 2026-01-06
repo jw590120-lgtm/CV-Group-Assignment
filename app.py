@@ -285,7 +285,7 @@ if uploaded_file is not None:
                     # 3. 渲染结果
                     if is_correct:
                         if confidence_val > 80:
-                            st.success(f"**{prediction}** ({confidence_val:.1f}%)")
+                            st.success(f"**{prediction}** ({confidence_val:.1f}%) - High Confidence")
                         elif confidence_val > 50:
                             st.warning(f"**{prediction}** ({confidence_val:.1f}%) - Moderate Confidence")
                         else:
@@ -317,3 +317,4 @@ if uploaded_file is not None:
 
 else:
     st.info("👈 Please upload a video file (Max 3s).")
+
