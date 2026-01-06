@@ -22,11 +22,10 @@ st.set_page_config(
 st.markdown("""
     <style>
     .main { background-color: #f8f9fa; }
-    .stButton>button {
-        width: 100%; border-radius: 10px; height: 3em;
-        background-color: #FF4B4B; color: white; font-weight: bold;
+    /* Start 按钮样式 (Primary - 红色) */
+    div.stButton > button:first-child {
+        width: 100%; border-radius: 10px; height: 3em; font-weight: bold;
     }
-    .stButton>button:hover { background-color: #D93F3F; border-color: #D93F3F; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -135,11 +134,22 @@ with st.sidebar:
     # 加载词汇表用于下拉菜单
     _, gestures_list, _ = load_model()
     if gestures_list:
-        # 添加一个 "Unknown" 选项作为默认值
         ground_truth_options = ["❓ Select Ground Truth..."] + gestures_list
         ground_truth = st.selectbox("Actual Gesture (Truth):", ground_truth_options)
     else:
         ground_truth = "❓ Select Ground Truth..."
+
+    # 【修改点 1】添加柱状图颜色说明
+    if ground_truth != "❓ Select Ground Truth...":
+        st.info(f"""
+        **Chart Legend for '{ground_truth}':**
+        
+        🟢 **Green Bar:** Prediction matches **{ground_truth}**.
+        
+        🔴 **Red Bar:** Prediction does NOT match.
+        """)
+    else:
+        st.caption("ℹ️ Select a gesture above to enable validation color coding (Green/Red).")
 
     st.markdown("---")
     
@@ -194,7 +204,13 @@ if uploaded_file is not None:
             else:
                 st.video(uploaded_file)
             
-            process_btn = st.button("🚀 Start Deep Analysis", type="primary")
+            # 【修改点 2】按钮布局：Start Analysis (左/主) + Feedback (右/灰)
+            btn_col1, btn_col2 = st.columns([3, 1])
+            with btn_col1:
+                process_btn = st.button("🚀 Start Deep Analysis", type="primary")
+            with btn_col2:
+                # 这是一个灰色的按钮，点击无反应，纯装饰，后续pre用到
+                st.button("💬 Feedback")
 
         if process_btn:
             if model is None:
@@ -258,29 +274,22 @@ if uploaded_file is not None:
 
                     st.divider()
                     
-                    # --- 【核心修改】颜色判断逻辑 ---
+                    # --- 颜色与结果逻辑 ---
+                    bar_color = "#FF4B4B" # 默认红
                     
-                    # 默认颜色 (如果没有选择 Ground Truth)
-                    bar_color = "#808080" # 灰色 (中立)
-                    result_msg = "Prediction Result"
-                    
-                    # 检查用户是否在侧边栏选择了真实动作
+                    # 【修改点 3】根据 Ground Truth 显示红/绿背景框
                     if ground_truth != "❓ Select Ground Truth...":
                         if prediction.lower() == ground_truth.lower():
-                            # 预测正确 -> 绿色
-                            bar_color = "#2ECC71" # Green
-                            result_msg = "✅ Correct Prediction!"
-                            st.success(f"Matched Ground Truth: **{ground_truth}**")
+                            # 预测正确：绿色条 + 绿色Success框
+                            bar_color = "#2ECC71" 
+                            st.success(f"✅ **Correct!** The model predicted **{prediction}** ({confidence_val:.1f}%) which matches your selection.")
                         else:
-                            # 预测错误 -> 红色
-                            bar_color = "#E74C3C" # Red
-                            result_msg = "❌ Incorrect Prediction"
-                            st.error(f"Expected: **{ground_truth}**, but got **{prediction}**")
+                            # 预测错误：红色条 + 红色Error框 (背景是红色的)
+                            bar_color = "#E74C3C" 
+                            st.error(f"❌ **Incorrect.** Expected **{ground_truth}**, but model predicted **{prediction}**.")
                     else:
-                        # 如果没选，默认使用主题色 (红色) 或中立色
-                        bar_color = "#FF4B4B" 
-
-                    st.metric(label=result_msg, value=prediction, delta=f"{confidence_val:.2f}% Confidence")
+                        # 没选 Ground Truth，显示中性结果
+                        st.metric(label="Prediction Result", value=prediction, delta=f"{confidence_val:.2f}% Confidence")
                     
                     st.write("### 📈 Probability Distribution")
                     chart_data = pd.DataFrame({
