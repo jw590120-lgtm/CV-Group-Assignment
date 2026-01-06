@@ -36,35 +36,18 @@ st.markdown("""
 mp_holistic = mp.solutions.holistic
 mp_drawing = mp.solutions.drawing_utils
 
-# --- 人脸模糊工具函数 (新增) ---
 def blur_face_region(image, results):
-    """
-    检测人脸坐标并应用高斯模糊
-    使用 pose_landmarks (0-10点) 来快速定位人脸，比 face_landmarks 更快
-    """
-    if not results.pose_landmarks:
-        return image
-        
+    if not results.pose_landmarks: return image
     h, w, _ = image.shape
-    
-    # 提取面部关键点 (鼻子0, 眼睛1-6, 耳朵7-8, 嘴巴9-10)
     face_indices = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-    x_coords = []
-    y_coords = []
+    x_coords = [int(results.pose_landmarks.landmark[i].x * w) for i in face_indices]
+    y_coords = [int(results.pose_landmarks.landmark[i].y * h) for i in face_indices]
     
-    for idx in face_indices:
-        lm = results.pose_landmarks.landmark[idx]
-        x_coords.append(int(lm.x * w))
-        y_coords.append(int(lm.y * h))
+    if not x_coords or not y_coords: return image
     
-    if not x_coords or not y_coords:
-        return image
-        
-    # 计算边界框
     x_min, x_max = min(x_coords), max(x_coords)
     y_min, y_max = min(y_coords), max(y_coords)
     
-    # 添加一些边距 (Padding) 让模糊范围更大一点
     padding_w = int((x_max - x_min) * 0.5)
     padding_h = int((y_max - y_min) * 0.5)
     
@@ -73,16 +56,10 @@ def blur_face_region(image, results):
     y_min = max(0, y_min - padding_h)
     y_max = min(h, y_max + padding_h)
     
-    # 截取人脸区域
     face_roi = image[y_min:y_max, x_min:x_max]
-    
     if face_roi.size > 0:
-        # 应用强力高斯模糊
-        # (99, 99) 是模糊核大小，必须是奇数，越大越模糊
         blurred_roi = cv2.GaussianBlur(face_roi, (99, 99), 30)
-        # 将模糊后的区域放回原图
         image[y_min:y_max, x_min:x_max] = blurred_roi
-        
     return image
 
 class Attention(nn.Module):
@@ -151,12 +128,11 @@ with st.sidebar:
     st.title("🧩 System Dashboard")
     st.markdown("---")
     
-    # --- 新增：隐私保护开关 ---
+    # 隐私保护开关
     st.write("### 🛡️ Privacy Settings")
-    enable_blur = st.checkbox("🙈 Blur Faces", value=False, help="Automatically detect and blur faces in the video.")
-    
+    enable_blur = st.checkbox("🙈 Blur Faces", value=False, help="Automatically detect and blur faces.")
     if enable_blur:
-        st.info("Privacy Mode Active: Faces will be blurred in processing.")
+        st.info("Privacy Mode Active: Faces will be blurred.")
     
     st.markdown("---")
     
@@ -179,114 +155,120 @@ with st.sidebar:
 # ===========================
 
 st.markdown("# 🎬 AI Gesture Analysis Studio")
-st.markdown("#### Upload a video to identify dynamic gestures using Deep Learning.")
+# 【修改点1】更新副标题，加入时长限制说明
+st.markdown("#### Upload a video (Max 3s) to identify dynamic gestures using Deep Learning.")
 st.markdown("---")
 
-uploaded_file = st.file_uploader("", type=['mp4', 'mov', 'avi'], help="Supported formats: MP4, MOV, AVI")
+# 【修改点2】在上传组件的help中也加入说明
+uploaded_file = st.file_uploader("", type=['mp4', 'mov', 'avi'], help="Limit: 3 seconds max. Formats: MP4, MOV, AVI")
 
 if uploaded_file is not None:
     tfile = tempfile.NamedTemporaryFile(delete=False)
     tfile.write(uploaded_file.read())
     
-    col_video, col_results = st.columns([1.5, 1])
+    # --- 【修改点3】新增：检测视频时长 ---
+    cap_check = cv2.VideoCapture(tfile.name)
+    fps = cap_check.get(cv2.CAP_PROP_FPS)
+    frame_count = cap_check.get(cv2.CAP_PROP_FRAME_COUNT)
+    duration = frame_count / fps if fps > 0 else 0
+    cap_check.release()
     
-    with col_video:
-        st.subheader("📺 Video Preview")
+    # 如果视频超过 3.5秒 (给0.5秒缓冲)，则阻止运行
+    if duration > 3.5:
+        st.error(f"⛔ **Video too long!** ({duration:.2f}s)")
+        st.warning("Please upload a video shorter than **3 seconds** for optimal accuracy.")
+        # 这里不显示后续的 UI，直接结束
+    else:
+        # 视频符合要求，继续显示界面
+        col_video, col_results = st.columns([1.5, 1])
         
-        # --- 隐私保护逻辑：如果开启模糊，则不显示原视频 ---
-        if enable_blur:
-            st.warning("🔒 **Raw Video Hidden** (Privacy Mode On)")
-            st.image("https://placehold.co/600x400/333/FFF?text=Privacy+Mode+Active", use_column_width=True)
-        else:
-            st.video(uploaded_file)
-        
-        process_btn = st.button("🚀 Start Deep Analysis", type="primary")
+        with col_video:
+            st.subheader("📺 Video Preview")
+            if enable_blur:
+                st.warning("🔒 **Raw Video Hidden** (Privacy Mode On)")
+                st.image("https://placehold.co/600x400/333/FFF?text=Privacy+Mode+Active", use_column_width=True)
+            else:
+                st.video(uploaded_file)
+            
+            process_btn = st.button("🚀 Start Deep Analysis", type="primary")
 
-    if process_btn:
-        if model is None:
-            st.error("Cannot proceed: Model not loaded.")
-        else:
-            with col_results:
-                st.subheader("📊 Processing Status")
-                
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                frame_window = st.empty() # 用于显示处理画面的占位符
-                
-                cap = cv2.VideoCapture(tfile.name)
-                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                if total_frames == 0: total_frames = 100
-                skip = max(int(total_frames / 30), 1)
-                sequence = []
-                
-                with mp_holistic.Holistic(min_detection_confidence=0.5, min_tracking_confidence=0.5) as holistic:
+        if process_btn:
+            if model is None:
+                st.error("Cannot proceed: Model not loaded.")
+            else:
+                with col_results:
+                    st.subheader("📊 Processing Status")
                     
-                    for i in range(30):
-                        progress = int((i / 30) * 100)
-                        progress_bar.progress(progress)
-                        status_text.text(f"Processing frame {i+1}/30...")
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    frame_window = st.empty()
+                    
+                    cap = cv2.VideoCapture(tfile.name)
+                    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                    if total_frames == 0: total_frames = 100
+                    skip = max(int(total_frames / 30), 1)
+                    sequence = []
+                    
+                    with mp_holistic.Holistic(min_detection_confidence=0.5, min_tracking_confidence=0.5) as holistic:
+                        frames_processed = 0
                         
-                        cap.set(cv2.CAP_PROP_POS_FRAMES, i * skip)
-                        ret, frame = cap.read()
-                        if not ret: break
-                        
-                        # 转换颜色
-                        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                        
-                        # MediaPipe 处理
-                        res = holistic.process(frame)
-                        
-                        # --- 核心修改：如果是模糊模式，处理人脸 ---
-                        display_frame = frame.copy()
-                        if enable_blur:
-                            display_frame = blur_face_region(display_frame, res)
+                        for i in range(30):
+                            progress = int((i / 30) * 100)
+                            progress_bar.progress(progress)
+                            status_text.text(f"Processing frame {i+1}/30...")
                             
-                        # 在显示的画面上画骨骼点 (可选，增加科技感)
-                        mp_drawing.draw_landmarks(display_frame, res.left_hand_landmarks, mp_holistic.HAND_CONNECTIONS)
-                        mp_drawing.draw_landmarks(display_frame, res.right_hand_landmarks, mp_holistic.HAND_CONNECTIONS)
-                        
-                        # 实时更新左侧视频区域的画面，让用户看到处理过程
-                        frame_window.image(display_frame, channels="RGB", caption=f"Frame {i+1} Analysis", use_column_width=True)
-                        
-                        # 收集数据用于推理
-                        sequence.append(extract_keypoints(res))
-                
-                cap.release()
-                progress_bar.progress(100)
-                status_text.success("✅ Extraction Complete!")
-                
-                # 补齐数据
-                while len(sequence) < 30:
-                    sequence.append(np.zeros(258))
-                
-                # --- 推理逻辑 ---
-                with st.spinner("🧠 Analyzing Pattern..."):
-                    input_tensor = torch.tensor(np.array([sequence]), dtype=torch.float32)
-                    with torch.no_grad():
-                        output = model(input_tensor)
-                        probs = torch.softmax(output, dim=1)[0]
+                            cap.set(cv2.CAP_PROP_POS_FRAMES, i * skip)
+                            ret, frame = cap.read()
+                            if not ret: break
+                            
+                            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                            res = holistic.process(frame)
+                            
+                            display_frame = frame.copy()
+                            if enable_blur:
+                                display_frame = blur_face_region(display_frame, res)
+                                
+                            mp_drawing.draw_landmarks(display_frame, res.left_hand_landmarks, mp_holistic.HAND_CONNECTIONS)
+                            mp_drawing.draw_landmarks(display_frame, res.right_hand_landmarks, mp_holistic.HAND_CONNECTIONS)
+                            
+                            frame_window.image(display_frame, channels="RGB", caption=f"Frame {i+1}", use_column_width=True)
+                            
+                            sequence.append(extract_keypoints(res))
+                            frames_processed += 1
                     
-                    conf, idx = torch.max(probs, 0)
-                    prediction = gestures[idx.item()]
-                    confidence_val = conf.item() * 100
-                    time.sleep(0.5)
+                    cap.release()
+                    progress_bar.progress(100)
+                    status_text.success("✅ Extraction Complete!")
+                    
+                    while len(sequence) < 30:
+                        sequence.append(np.zeros(258))
+                    
+                    with st.spinner("🧠 Analyzing Pattern..."):
+                        input_tensor = torch.tensor(np.array([sequence]), dtype=torch.float32)
+                        with torch.no_grad():
+                            output = model(input_tensor)
+                            probs = torch.softmax(output, dim=1)[0]
+                        
+                        conf, idx = torch.max(probs, 0)
+                        prediction = gestures[idx.item()]
+                        confidence_val = conf.item() * 100
+                        time.sleep(0.5)
 
-                # --- 结果展示 ---
-                st.divider()
-                st.metric(label="🏆 Top Prediction", value=prediction, delta=f"{confidence_val:.2f}% Confidence")
-                
-                if confidence_val > 80: st.balloons()
-                
-                st.write("### 📈 Full Probability Distribution")
-                chart_data = pd.DataFrame({
-                    "Gesture": gestures,
-                    "Probability": probs.numpy()
-                }).sort_values(by="Probability", ascending=False)
-                
-                st.bar_chart(chart_data, x="Gesture", y="Probability", color="#FF4B4B")
-                
-                with st.expander("📄 View Raw Data Table"):
-                    st.dataframe(chart_data.style.format({"Probability": "{:.4%}"}))
+                    st.divider()
+                    st.metric(label="🏆 Top Prediction", value=prediction, delta=f"{confidence_val:.2f}% Confidence")
+                    
+                    if confidence_val > 80: st.balloons()
+                    
+                    st.write("### 📈 Full Probability Distribution")
+                    chart_data = pd.DataFrame({
+                        "Gesture": gestures,
+                        "Probability": probs.numpy()
+                    }).sort_values(by="Probability", ascending=False)
+                    
+                    st.bar_chart(chart_data, x="Gesture", y="Probability", color="#FF4B4B")
+                    
+                    with st.expander("📄 View Raw Data Table"):
+                        st.dataframe(chart_data.style.format({"Probability": "{:.4%}"}))
 
 else:
-    st.info("👈 Please upload a video file from the sidebar or main area to begin.")
+    st.info("👈 Please upload a video file (Max 3s) from the sidebar or main area to begin.")
