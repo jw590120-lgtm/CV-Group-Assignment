@@ -10,7 +10,7 @@ import time
 import os
 
 # ===========================
-# 1. 页面配置与美化 (UI Configuration)
+# 1. 页面配置与美化
 # ===========================
 st.set_page_config(
     page_title="AI Gesture Studio",
@@ -21,34 +21,69 @@ st.set_page_config(
 
 st.markdown("""
     <style>
-    .main {
-        background-color: #f8f9fa;
-    }
+    .main { background-color: #f8f9fa; }
     .stButton>button {
-        width: 100%;
-        border-radius: 10px;
-        height: 3em;
-        background-color: #FF4B4B;
-        color: white;
-        font-weight: bold;
+        width: 100%; border-radius: 10px; height: 3em;
+        background-color: #FF4B4B; color: white; font-weight: bold;
     }
-    .stButton>button:hover {
-        background-color: #D93F3F;
-        border-color: #D93F3F;
-    }
-    h1 {
-        color: #1E1E1E;
-    }
-    .css-1aumxhk {
-        padding: 1rem;
-    }
+    .stButton>button:hover { background-color: #D93F3F; border-color: #D93F3F; }
     </style>
     """, unsafe_allow_html=True)
 
 # ===========================
-# 2. 核心模型定义 (Model Core)
+# 2. 核心模型定义
 # ===========================
 mp_holistic = mp.solutions.holistic
+mp_drawing = mp.solutions.drawing_utils
+
+# --- 人脸模糊工具函数 (新增) ---
+def blur_face_region(image, results):
+    """
+    检测人脸坐标并应用高斯模糊
+    使用 pose_landmarks (0-10点) 来快速定位人脸，比 face_landmarks 更快
+    """
+    if not results.pose_landmarks:
+        return image
+        
+    h, w, _ = image.shape
+    
+    # 提取面部关键点 (鼻子0, 眼睛1-6, 耳朵7-8, 嘴巴9-10)
+    face_indices = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    x_coords = []
+    y_coords = []
+    
+    for idx in face_indices:
+        lm = results.pose_landmarks.landmark[idx]
+        x_coords.append(int(lm.x * w))
+        y_coords.append(int(lm.y * h))
+    
+    if not x_coords or not y_coords:
+        return image
+        
+    # 计算边界框
+    x_min, x_max = min(x_coords), max(x_coords)
+    y_min, y_max = min(y_coords), max(y_coords)
+    
+    # 添加一些边距 (Padding) 让模糊范围更大一点
+    padding_w = int((x_max - x_min) * 0.5)
+    padding_h = int((y_max - y_min) * 0.5)
+    
+    x_min = max(0, x_min - padding_w)
+    x_max = min(w, x_max + padding_w)
+    y_min = max(0, y_min - padding_h)
+    y_max = min(h, y_max + padding_h)
+    
+    # 截取人脸区域
+    face_roi = image[y_min:y_max, x_min:x_max]
+    
+    if face_roi.size > 0:
+        # 应用强力高斯模糊
+        # (99, 99) 是模糊核大小，必须是奇数，越大越模糊
+        blurred_roi = cv2.GaussianBlur(face_roi, (99, 99), 30)
+        # 将模糊后的区域放回原图
+        image[y_min:y_max, x_min:x_max] = blurred_roi
+        
+    return image
 
 class Attention(nn.Module):
     def __init__(self, hidden_dim):
@@ -97,11 +132,9 @@ def load_model():
         "bomba", "buat", "emak", "hi", "lelaki",
         "main", "polis", "saudara", "siapa", "tandas"
     ]
-    
     device = torch.device("cpu")
     model = BiLSTMAttention(input_size=258, hidden_size=128, num_classes=len(gestures))
     
-    status_text = "Checking model file..."
     try:
         model.load_state_dict(torch.load("trained_model.pth", map_location=device))
         model.eval()
@@ -112,65 +145,61 @@ def load_model():
         return None, None, f"Error: {str(e)}"
 
 # ===========================
-# 3. 侧边栏设计 (Sidebar)
+# 3. 侧边栏设计
 # ===========================
 with st.sidebar:
     st.title("🧩 System Dashboard")
     st.markdown("---")
     
-    # 模型状态指示器
+    # --- 新增：隐私保护开关 ---
+    st.write("### 🛡️ Privacy Settings")
+    enable_blur = st.checkbox("🙈 Blur Faces", value=False, help="Automatically detect and blur faces in the video.")
+    
+    if enable_blur:
+        st.info("Privacy Mode Active: Faces will be blurred in processing.")
+    
+    st.markdown("---")
+    
+    # 模型状态
     model, gestures, status = load_model()
     if status == "Loaded":
         st.success("Model Status: **Active** ✅")
-        
         st.warning("⚠️ **Model Limitation**")
-        st.caption("""
-        The system cannot process a complete vocabulary. 
-        Current model is trained **ONLY** on the following 15 gestures:
-        """)
-        # 以列表形式展示词汇
+        st.caption("Current model supports ONLY these 15 gestures:")
         st.code("\n".join(gestures), language="text")
-        
     else:
         st.error(f"Model Status: **{status}** ❌")
-        st.warning("Please upload 'trained_model.pth' to your GitHub repository.")
+        st.warning("Please upload 'trained_model.pth'.")
     
-    st.markdown("---")
-    st.info("""
-    **How to use:**
-    1. Upload a video file.
-    2. Click 'Start Analysis'.
-    3. View frame-by-frame processing.
-    4. Check the prediction report.
-    """)
     st.markdown("---")
     st.caption("CV Group Assignment 2025")
 
 # ===========================
-# 4. 主界面设计 (Main Interface)
+# 4. 主界面设计
 # ===========================
 
-# 标题区
 st.markdown("# 🎬 AI Gesture Analysis Studio")
 st.markdown("#### Upload a video to identify dynamic gestures using Deep Learning.")
 st.markdown("---")
 
-# 文件上传区
 uploaded_file = st.file_uploader("", type=['mp4', 'mov', 'avi'], help="Supported formats: MP4, MOV, AVI")
 
 if uploaded_file is not None:
-    # 保存临时文件
     tfile = tempfile.NamedTemporaryFile(delete=False)
     tfile.write(uploaded_file.read())
     
-    # 布局：左侧视频，右侧结果占位
     col_video, col_results = st.columns([1.5, 1])
     
     with col_video:
         st.subheader("📺 Video Preview")
-        st.video(uploaded_file)
         
-        # 启动按钮
+        # --- 隐私保护逻辑：如果开启模糊，则不显示原视频 ---
+        if enable_blur:
+            st.warning("🔒 **Raw Video Hidden** (Privacy Mode On)")
+            st.image("https://placehold.co/600x400/333/FFF?text=Privacy+Mode+Active", use_column_width=True)
+        else:
+            st.video(uploaded_file)
+        
         process_btn = st.button("🚀 Start Deep Analysis", type="primary")
 
     if process_btn:
@@ -178,31 +207,21 @@ if uploaded_file is not None:
             st.error("Cannot proceed: Model not loaded.")
         else:
             with col_results:
-                st.subheader("📊 Analysis Report")
+                st.subheader("📊 Processing Status")
                 
-                # 进度条和状态文本
                 progress_bar = st.progress(0)
                 status_text = st.empty()
+                frame_window = st.empty() # 用于显示处理画面的占位符
                 
-                # --- 视频处理逻辑 ---
                 cap = cv2.VideoCapture(tfile.name)
                 total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                
-                # 简单防错
                 if total_frames == 0: total_frames = 100
-                
-                # 采样策略：均匀提取30帧
                 skip = max(int(total_frames / 30), 1)
                 sequence = []
                 
-                status_text.markdown("**🔄 Initializing MediaPipe...**")
-                
-                # 使用 MediaPipe 处理
                 with mp_holistic.Holistic(min_detection_confidence=0.5, min_tracking_confidence=0.5) as holistic:
-                    frames_processed = 0
                     
                     for i in range(30):
-                        # 更新进度条
                         progress = int((i / 30) * 100)
                         progress_bar.progress(progress)
                         status_text.text(f"Processing frame {i+1}/30...")
@@ -211,67 +230,63 @@ if uploaded_file is not None:
                         ret, frame = cap.read()
                         if not ret: break
                         
+                        # 转换颜色
                         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        
+                        # MediaPipe 处理
                         res = holistic.process(frame)
+                        
+                        # --- 核心修改：如果是模糊模式，处理人脸 ---
+                        display_frame = frame.copy()
+                        if enable_blur:
+                            display_frame = blur_face_region(display_frame, res)
+                            
+                        # 在显示的画面上画骨骼点 (可选，增加科技感)
+                        mp_drawing.draw_landmarks(display_frame, res.left_hand_landmarks, mp_holistic.HAND_CONNECTIONS)
+                        mp_drawing.draw_landmarks(display_frame, res.right_hand_landmarks, mp_holistic.HAND_CONNECTIONS)
+                        
+                        # 实时更新左侧视频区域的画面，让用户看到处理过程
+                        frame_window.image(display_frame, channels="RGB", caption=f"Frame {i+1} Analysis", use_column_width=True)
+                        
+                        # 收集数据用于推理
                         sequence.append(extract_keypoints(res))
-                        frames_processed += 1
                 
                 cap.release()
                 progress_bar.progress(100)
-                status_text.success("✅ Feature Extraction Complete!")
+                status_text.success("✅ Extraction Complete!")
                 
-                # 补齐数据 (Padding)
+                # 补齐数据
                 while len(sequence) < 30:
                     sequence.append(np.zeros(258))
                 
                 # --- 推理逻辑 ---
-                with st.spinner("🧠 Running Neural Network Inference..."):
+                with st.spinner("🧠 Analyzing Pattern..."):
                     input_tensor = torch.tensor(np.array([sequence]), dtype=torch.float32)
                     with torch.no_grad():
                         output = model(input_tensor)
                         probs = torch.softmax(output, dim=1)[0]
                     
-                    # 获取结果
                     conf, idx = torch.max(probs, 0)
                     prediction = gestures[idx.item()]
                     confidence_val = conf.item() * 100
-                    
                     time.sleep(0.5)
 
-                # --- 结果展示 (Result Dashboard) ---
+                # --- 结果展示 ---
                 st.divider()
+                st.metric(label="🏆 Top Prediction", value=prediction, delta=f"{confidence_val:.2f}% Confidence")
                 
-                # 1. 核心指标卡片
-                st.metric(
-                    label="🏆 Top Prediction",
-                    value=prediction,
-                    delta=f"{confidence_val:.2f}% Confidence"
-                )
+                if confidence_val > 80: st.balloons()
                 
-                if confidence_val > 80:
-                    st.balloons() 
-                
-                # 2. 概率分布图 (显示所有权重)
                 st.write("### 📈 Full Probability Distribution")
-                
-                # 整理数据 (排序：从高到低，但保留所有行)
                 chart_data = pd.DataFrame({
                     "Gesture": gestures,
                     "Probability": probs.numpy()
                 }).sort_values(by="Probability", ascending=False)
                 
-                # 展示所有数据
-                st.bar_chart(
-                    chart_data, 
-                    x="Gesture", 
-                    y="Probability",
-                    color="#FF4B4B"
-                )
+                st.bar_chart(chart_data, x="Gesture", y="Probability", color="#FF4B4B")
                 
-                # 3. 详细数据展开
                 with st.expander("📄 View Raw Data Table"):
                     st.dataframe(chart_data.style.format({"Probability": "{:.4%}"}))
 
 else:
-    # 空状态提示
     st.info("👈 Please upload a video file from the sidebar or main area to begin.")
