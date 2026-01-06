@@ -22,7 +22,7 @@ st.set_page_config(
 st.markdown("""
     <style>
     .main { background-color: #f8f9fa; }
-    /* Start 按钮样式 (Primary - 红色) */
+    /* Start 按钮样式 */
     div.stButton > button:first-child {
         width: 100%; border-radius: 10px; height: 3em; font-weight: bold;
     }
@@ -127,11 +127,9 @@ with st.sidebar:
     st.title("🧩 System Dashboard")
     st.markdown("---")
     
-    # --- 功能区 1: 验证模式 ---
     st.write("### 🎯 Validation Mode")
     st.caption("Select the actual gesture to verify prediction correctness.")
     
-    # 加载词汇表用于下拉菜单
     _, gestures_list, _ = load_model()
     if gestures_list:
         ground_truth_options = ["❓ Select Ground Truth..."] + gestures_list
@@ -139,35 +137,16 @@ with st.sidebar:
     else:
         ground_truth = "❓ Select Ground Truth..."
 
-    # 【修改点 1】添加柱状图颜色说明
-    if ground_truth != "❓ Select Ground Truth...":
-        st.info(f"""
-        **Chart Legend for '{ground_truth}':**
-        
-        🟢 **Green Bar:** Prediction matches **{ground_truth}**.
-        
-        🔴 **Red Bar:** Prediction does NOT match.
-        """)
-    else:
-        st.caption("ℹ️ Select a gesture above to enable validation color coding (Green/Red).")
-
     st.markdown("---")
-    
-    # --- 功能区 2: 隐私保护 ---
     st.write("### 🛡️ Privacy Settings")
     enable_blur = st.checkbox("🙈 Blur Faces", value=False)
     
     st.markdown("---")
-    
-    # 模型状态
     model, gestures, status = load_model()
     if status == "Loaded":
         st.success("Model Status: **Active** ✅")
     else:
         st.error(f"Model Status: **{status}** ❌")
-        st.warning("Please upload 'trained_model.pth'.")
-    
-    st.markdown("---")
     st.caption("CV Group Assignment 2025")
 
 # ===========================
@@ -204,13 +183,21 @@ if uploaded_file is not None:
             else:
                 st.video(uploaded_file)
             
-            # 【修改点 2】按钮布局：Start Analysis (左/主) + Feedback (右/灰)
             btn_col1, btn_col2 = st.columns([3, 1])
             with btn_col1:
                 process_btn = st.button("🚀 Start Deep Analysis", type="primary")
             with btn_col2:
-                # 这是一个灰色的按钮，点击无反应，纯装饰，后续pre用到
                 st.button("💬 Feedback")
+            
+            # 【修改点 1】: 将颜色规则说明移动到按钮下方
+            st.markdown("""
+            <div style="font-size: 12px; color: #555; background-color: #f0f2f6; padding: 10px; border-radius: 5px; margin-top: 10px;">
+                <strong>🎨 Confidence Color Guide:</strong><br>
+                <span style="color: #2ECC71;">█</span> <strong>High (>80%)</strong>: Excellent Prediction<br>
+                <span style="color: #F39C12;">█</span> <strong>Medium (50-80%)</strong>: Uncertain<br>
+                <span style="color: #E74C3C;">█</span> <strong>Low (<50%)</strong>: Likely Incorrect
+            </div>
+            """, unsafe_allow_html=True)
 
         if process_btn:
             if model is None:
@@ -230,7 +217,6 @@ if uploaded_file is not None:
                     sequence = []
                     
                     with mp_holistic.Holistic(min_detection_confidence=0.5, min_tracking_confidence=0.5) as holistic:
-                        
                         for i in range(30):
                             progress = int((i / 30) * 100)
                             progress_bar.progress(progress)
@@ -246,17 +232,16 @@ if uploaded_file is not None:
                             display_frame = frame.copy()
                             if enable_blur:
                                 display_frame = blur_face_region(display_frame, res)
-                                
+                            
                             mp_drawing.draw_landmarks(display_frame, res.left_hand_landmarks, mp_holistic.HAND_CONNECTIONS)
                             mp_drawing.draw_landmarks(display_frame, res.right_hand_landmarks, mp_holistic.HAND_CONNECTIONS)
-                            
-                            frame_window.image(display_frame, channels="RGB", caption=f"Processing...", use_column_width=True)
+                            frame_window.image(display_frame, channels="RGB", use_column_width=True)
                             
                             sequence.append(extract_keypoints(res))
                     
                     cap.release()
                     progress_bar.progress(100)
-                    status_text.success("✅ Complete!")
+                    status_text.empty() # 清除处理文字
                     
                     while len(sequence) < 30:
                         sequence.append(np.zeros(258))
@@ -274,22 +259,49 @@ if uploaded_file is not None:
 
                     st.divider()
                     
-                    # --- 颜色与结果逻辑 ---
-                    bar_color = "#FF4B4B" # 默认红
+                    # --- 【修改点 2】: 三色逻辑实现 ---
+                    # 定义默认颜色 (Gray)
+                    theme_color = "#808080"
+                    status_msg = "Prediction Result"
                     
-                    # 【修改点 3】根据 Ground Truth 显示红/绿背景框
-                    if ground_truth != "❓ Select Ground Truth...":
-                        if prediction.lower() == ground_truth.lower():
-                            # 预测正确：绿色条 + 绿色Success框
-                            bar_color = "#2ECC71" 
-                            st.success(f"✅ **Correct!** The model predicted **{prediction}** ({confidence_val:.1f}%) which matches your selection.")
-                        else:
-                            # 预测错误：红色条 + 红色Error框 (背景是红色的)
-                            bar_color = "#E74C3C" 
-                            st.error(f"❌ **Incorrect.** Expected **{ground_truth}**, but model predicted **{prediction}**.")
+                    # 1. 首先根据置信度定基调
+                    if confidence_val > 80:
+                        theme_color = "#2ECC71" # Green
+                    elif 50 <= confidence_val <= 80:
+                        theme_color = "#F39C12" # Orange
                     else:
-                        # 没选 Ground Truth，显示中性结果
-                        st.metric(label="Prediction Result", value=prediction, delta=f"{confidence_val:.2f}% Confidence")
+                        theme_color = "#E74C3C" # Red
+                    
+                    # 2. 如果有 Ground Truth 验证，验证失败则强制变红
+                    is_correct = True
+                    if ground_truth != "❓ Select Ground Truth...":
+                        if prediction.lower() != ground_truth.lower():
+                            theme_color = "#E74C3C" # 强制红色
+                            is_correct = False
+                            status_msg = f"❌ Error (Expected: {ground_truth})"
+                        else:
+                            status_msg = f"✅ Correct Match"
+                    
+                    # 3. 渲染结果
+                    if is_correct:
+                        if confidence_val > 80:
+                            st.success(f"**{prediction}** ({confidence_val:.1f}%)")
+                        elif confidence_val > 50:
+                            st.warning(f"**{prediction}** ({confidence_val:.1f}%) - Moderate Confidence")
+                        else:
+                            st.error(f"**{prediction}** ({confidence_val:.1f}%) - Low Confidence")
+                    else:
+                        st.error(f"Predicted: **{prediction}** | Expected: **{ground_truth}**")
+
+                    # 4. 【修改点 3】: 自定义彩色进度条 (Streamlit原生不支持变色进度条，用HTML实现)
+                    st.write("Confidence Score:")
+                    st.markdown(f"""
+                    <div style="background-color: #eee; border-radius: 10px; padding: 3px;">
+                        <div style="width: {confidence_val}%; background-color: {theme_color}; height: 20px; border-radius: 8px; text-align: center; color: white; font-size: 12px; line-height: 20px;">
+                            {confidence_val:.1f}%
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
                     
                     st.write("### 📈 Probability Distribution")
                     chart_data = pd.DataFrame({
@@ -297,8 +309,8 @@ if uploaded_file is not None:
                         "Probability": probs.numpy()
                     }).sort_values(by="Probability", ascending=False)
                     
-                    # 动态设置图表颜色
-                    st.bar_chart(chart_data, x="Gesture", y="Probability", color=bar_color)
+                    # 5. 图表颜色跟随逻辑
+                    st.bar_chart(chart_data, x="Gesture", y="Probability", color=theme_color)
                     
                     with st.expander("📄 View Raw Data"):
                         st.dataframe(chart_data.style.format({"Probability": "{:.4%}"}))
