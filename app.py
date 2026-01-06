@@ -92,8 +92,11 @@ def extract_keypoints(results):
 # --- 加载模型 ---
 @st.cache_resource
 def load_model():
-    # 【重要】请修改为你真实的15个英文手势名称
-    gestures = [f"Gesture {i}" for i in range(1, 16)] 
+    gestures = [
+        "abang", "apa", "ayah", "beli", "bila",
+        "bomba", "buat", "emak", "hi", "lelaki",
+        "main", "polis", "saudara", "siapa", "tandas"
+    ]
     
     device = torch.device("cpu")
     model = BiLSTMAttention(input_size=258, hidden_size=128, num_classes=len(gestures))
@@ -119,7 +122,15 @@ with st.sidebar:
     model, gestures, status = load_model()
     if status == "Loaded":
         st.success("Model Status: **Active** ✅")
-        st.caption(f"Architecture: BiLSTM + Attention\nClasses: {len(gestures)}")
+        
+        st.warning("⚠️ **Model Limitation**")
+        st.caption("""
+        The system cannot process a complete vocabulary. 
+        Current model is trained **ONLY** on the following 15 gestures:
+        """)
+        # 以列表形式展示词汇
+        st.code("\n".join(gestures), language="text")
+        
     else:
         st.error(f"Model Status: **{status}** ❌")
         st.warning("Please upload 'trained_model.pth' to your GitHub repository.")
@@ -177,6 +188,7 @@ if uploaded_file is not None:
                 cap = cv2.VideoCapture(tfile.name)
                 total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
                 
+                # 简单防错
                 if total_frames == 0: total_frames = 100
                 
                 # 采样策略：均匀提取30帧
@@ -242,13 +254,13 @@ if uploaded_file is not None:
                 # 2. 概率分布图 (显示所有权重)
                 st.write("### 📈 Full Probability Distribution")
                 
-                # 整理数据
+                # 整理数据 (排序：从高到低，但保留所有行)
                 chart_data = pd.DataFrame({
                     "Gesture": gestures,
                     "Probability": probs.numpy()
                 }).sort_values(by="Probability", ascending=False)
                 
-                # 直接展示所有数据
+                # 展示所有数据
                 st.bar_chart(
                     chart_data, 
                     x="Gesture", 
